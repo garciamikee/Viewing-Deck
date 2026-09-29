@@ -38,15 +38,15 @@ git push -u origin main
 ```
 
 Then import that repo at https://vercel.com/new (framework preset: **Other**,
-no build step). Once you have the deployed URL, add it to Firebase Console →
-Authentication → Settings → **Authorized domains** — otherwise Google
-sign-in will fail here too.
+no build step). Sign-in here uses the same email/password accounts as the
+main system — anyone who already created an account there can sign in here
+too, nothing extra to configure.
 
 ## Why sign-in is still required
 
 Firestore's rules (shared with the main system) require a signed-in
-`@1wan.ph` Google account for every read, not just writes — so this page
-can't be handed to literally anyone on the internet, only to people with a
-company account. That was a deliberate trade-off: the alternative (open
-read access to anyone with the link) would also expose customer names, PO
-numbers and delivery routes to the open internet.
+`@1wan.ph` account for every read, not just writes — so this page can't be
+handed to literally anyone on the internet, only to people with a company
+account. That was a deliberate trade-off: the alternative (open read access
+to anyone with the link) would also expose customer names, PO numbers and
+delivery routes to the open internet.
