@@ -92,9 +92,13 @@
 
   .lede{ color:var(--muted); font-size:13.5px; max-width:64ch; margin:2px 0 22px; }
   section.block{ margin-bottom:30px; }
-  .block-head{ display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin-bottom:12px; flex-wrap:wrap; }
+  .block-head{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; flex-wrap:wrap; }
   .block-head h2{ font-size:16px; margin:0; font-weight:600; }
   .block-head .hint{ font-size:12px; color:var(--muted); }
+  .search{ display:flex; align-items:center; gap:8px; background:var(--surface); border:1px solid var(--line); border-radius:9px; padding:7px 12px; width:220px; color:var(--muted); font-size:13px; }
+  .search input{ border:none; background:none; outline:none; color:var(--ink); font-size:13px; width:100%; font-family:inherit; }
+  .search input::placeholder{ color:var(--faint); }
+  @media (max-width:640px){ .search{ width:100%; } }
 
   .dash-cards{ display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-bottom:4px; }
   .dash-card{ background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:16px; box-shadow:var(--shadow); text-align:left; cursor:pointer; transition:border-color .15s; color:var(--ink); }
@@ -163,7 +167,10 @@
   </section>
 
   <section class="block">
-    <div class="block-head"><h2>Inventory list</h2><span class="hint">all items on hand — view only</span></div>
+    <div class="block-head">
+      <h2>Inventory list</h2>
+      <label class="search"><span aria-hidden="true">⌕</span><input id="inventorySearch" type="text" placeholder="Search model or category…"></label>
+    </div>
     <div class="table-wrap">
       <table>
         <thead><tr><th>Model</th><th>Category</th><th>Location</th><th>Stock</th><th>Status</th></tr></thead>
@@ -257,10 +264,13 @@
   }
 
   function renderInventory(){
-    var rows = state.inventory.slice().sort(function(a,b){ return a.model.localeCompare(b.model); });
+    var q = (document.getElementById("inventorySearch").value||"").trim().toLowerCase();
+    var rows = state.inventory.filter(function(i){
+      return !q || i.model.toLowerCase().indexOf(q) > -1 || (i.cat||"").toLowerCase().indexOf(q) > -1;
+    }).sort(function(a,b){ return a.model.localeCompare(b.model); });
     document.getElementById("inventoryBody").innerHTML = rows.length ? rows.map(function(i){
       return '<tr><td>'+esc(i.model)+(i.specs?'<span class="specs-sub">'+esc(i.specs)+'</span>':'')+'</td><td>'+esc(i.cat)+'</td><td>'+esc(i.loc)+'</td><td class="num">'+(i.stock||0).toLocaleString()+'</td><td>'+stockPill(i.stock||0)+'</td></tr>';
-    }).join("") : '<tr><td colspan="5" class="empty">No SKUs yet.</td></tr>';
+    }).join("") : '<tr><td colspan="5" class="empty">'+(q ? "No matches." : "No SKUs yet.")+'</td></tr>';
   }
 
   function renderAll(){ renderLogistics(); renderInventory(); }
@@ -398,6 +408,7 @@
   function setup(){
     updateAsOfDate();
     setInterval(updateAsOfDate, 60000);
+    document.getElementById("inventorySearch").addEventListener("input", renderInventory);
     initAuth();
   }
   if(document.readyState === "loading"){ document.addEventListener("DOMContentLoaded", setup); } else { setup(); }
