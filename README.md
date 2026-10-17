@@ -1,16 +1,24 @@
 # Logistics &amp; Inventory Viewing Deck
 
-A separate, read-only companion site to the
+A separate companion site to the
 [Inventory-Logistics System](../inventory-logistics-system) — same Firebase
-project, same live data, but with **no edit, delete, or check-in/out forms
-at all**. Meant to be handed out broadly inside the company for visibility
-(status of client deliveries, current stock) without giving anyone editing
-access through this link.
+project, same live data, but with **no edit, delete, or check-in/out
+screens**. Meant to be handed out broadly inside the company for visibility
+(status of client deliveries, current stock). The one thing it can do is file
+a **Request for Testing**.
 
 It shows:
 - **Logistics dashboard** — For Delivery / In Transit / Delivered counts for
   client deliveries, click a card to see the entries.
-- **Inventory list** — every SKU and its current stock, view only.
+- **Request for testing** — a clickable option that opens a short form:
+  request date, customer name, PO / RFQ no., item (dropdown from the
+  inventory list), quantity and serial number(s). "Requested by" is filled
+  from the signed-in email and can't be changed. Filing a request takes the
+  units out of stock straight away (the stock is re-read from the database
+  at that moment, so two people can't both take the last units) and creates
+  a record in the main system, where its status is managed (On going →
+  Passed / Returned).
+- **Inventory list** — every SKU and its current stock, with search.
 
 ## Setup
 

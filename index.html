@@ -9,12 +9,14 @@
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 
 <!-- Same Firebase project as the main Inventory-Logistics System — this page
-     reads the exact same live data, it just can't write or delete anything. -->
+     reads the exact same live data. The only thing it can write is a Request
+     for Testing (a new test_requests record plus the matching stock deduction);
+     it can't edit or delete anything. -->
 <script src="firebase-config.js"></script>
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-app.js";
   import {
-    getFirestore, collection, doc, getDocs, onSnapshot, query, orderBy, limit
+    getFirestore, collection, doc, getDoc, getDocs, addDoc, updateDoc, onSnapshot, query, orderBy, limit
   } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-firestore.js";
   import {
     getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword,
@@ -44,10 +46,19 @@
 
       function wrapDocSnap(snap){ return { id: snap.id, exists: snap.exists(), data: function(){ return snap.data(); } }; }
       function wrapQuerySnap(snap){ return { docs: snap.docs.map(wrapDocSnap), size: snap.size, empty: snap.empty }; }
+      function makeDocRef(path){
+        var ref = doc(firestore, path);
+        return {
+          id: ref.id,
+          get: function(){ return getDoc(ref).then(wrapDocSnap); },
+          update: function(data){ return updateDoc(ref, data); }
+        };
+      }
       function makeCollRef(path){
         var constraints = [];
         var api = {
           path: path,
+          add: function(data){ return addDoc(collection(firestore, path), data).then(function(r){ return { id: r.id }; }); },
           orderBy: function(f, dir){ constraints = constraints.concat([orderBy(f, dir || "asc")]); return api; },
           limit: function(n){ constraints = constraints.concat([limit(n)]); return api; },
           get: function(){ return getDocs(query.apply(null, [collection(firestore, path)].concat(constraints))).then(wrapQuerySnap); },
@@ -57,7 +68,7 @@
         };
         return api;
       }
-      resolve({ collection: makeCollRef });
+      resolve({ doc: makeDocRef, collection: makeCollRef });
     }catch(e){ reject(e); }
   });
 </script>
@@ -138,6 +149,22 @@
   .formmsg{ font-size:11.5px; font-weight:700; color:#ffffff; padding:3px 10px; border-radius:99px; display:inline-block; margin-top:14px; }
   .formmsg:empty{ padding:0; margin:0; }
   .formmsg.err{ background:var(--bad); }
+  .formmsg.ok{ background:var(--good); }
+
+  .formcard{ background:var(--surface); border:1px solid var(--line); border-radius:12px; box-shadow:var(--shadow); padding:16px 18px; margin-top:12px; }
+  .formcard .subtable-title{ font-size:13px; font-weight:700; margin:0 0 10px; color:var(--ink); }
+  .formgrid{ display:grid; grid-template-columns:repeat(4,1fr); gap:12px; align-items:end; }
+  .field{ display:flex; flex-direction:column; gap:5px; }
+  .field.span2{ grid-column:span 2; }
+  .field.full{ grid-column:1/-1; }
+  .field label{ font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); font-weight:600; }
+  .field input, .field select{ border:1px solid var(--line); background:var(--bg); color:var(--ink); border-radius:8px; padding:8px 10px; font-size:13.5px; font-family:inherit; }
+  .field input[readonly]{ color:var(--muted); }
+  .formfoot{ display:flex; align-items:center; gap:10px; margin-top:12px; flex-wrap:wrap; }
+  .formfoot .formmsg{ margin-top:0; }
+  .req-card{ display:block; width:100%; max-width:340px; }
+  .req-card .dc-value{ font-size:18px; }
+  @media (max-width:900px){ .formgrid{ grid-template-columns:repeat(2,1fr); } }
 
   @media (max-width:640px){ .deck-wrap{ padding:20px 16px 48px; } }
 </style>
@@ -168,6 +195,33 @@
   </section>
 
   <section class="block">
+    <div class="block-head"><h2>Request for testing</h2><span class="hint">take units out for customer testing — click to fill out the details</span></div>
+    <button type="button" class="dash-card req-card" id="testToggle" aria-pressed="false">
+      <div class="dc-label">Request for testing</div>
+      <div class="dc-value">+ File a request</div>
+      <div class="dc-hint">units are taken out of stock as soon as it's filed</div>
+    </button>
+    <div class="formcard" id="testFormCard" hidden>
+      <div class="subtable-title">Request for testing</div>
+      <form id="testForm">
+        <div class="formgrid">
+          <div class="field"><label>Request date</label><input name="date" type="date" required></div>
+          <div class="field"><label>Customer name</label><input name="customer" required placeholder="e.g. Infinivan"></div>
+          <div class="field"><label>PO / RFQ no.</label><input name="po" required placeholder="e.g. RFQ-2026-014"></div>
+          <div class="field"><label>Requested by</label><input id="testRequestedBy" readonly placeholder="Your sign-in email"></div>
+          <div class="field span2"><label>Item</label><select name="itemId" required></select></div>
+          <div class="field"><label>Quantity</label><input name="qty" type="number" min="1" value="1" required></div>
+          <div class="field full"><label>Serial number(s) — required, one per unit</label><input name="serials" required placeholder="e.g. SN001, SN002"></div>
+        </div>
+        <div class="formfoot">
+          <button class="btn" type="submit" id="testSubmit">File request</button>
+          <span class="formmsg" id="testMsg"></span>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <section class="block">
     <div class="block-head">
       <h2>Inventory list</h2>
       <label class="search"><span aria-hidden="true">⌕</span><input id="inventorySearch" type="text" placeholder="Search model or category…"></label>
@@ -180,7 +234,7 @@
     </div>
   </section>
 
-  <div class="note">Live view — this list and dashboard update automatically as items are checked in, checked out, and delivered. Nothing here can be edited.</div>
+  <div class="note">Live view — this list and dashboard update automatically as items are checked in, checked out, and delivered. The only thing you can do from here is file a request for testing; everything else is managed in the main system.</div>
 </div>
 
 <div class="modal-overlay" id="authGate">
@@ -274,7 +328,95 @@
     }).join("") : '<tr><td colspan="5" class="empty">'+(q ? "No matches." : "No SKUs yet.")+'</td></tr>';
   }
 
-  function renderAll(){ renderLogistics(); renderInventory(); }
+  // ---- Request for testing (the one write this page can do) ----
+  var db = null;
+
+  function splitSerials(s){ return String(s||"").split(/[,\n]+/).map(function(x){return x.trim();}).filter(Boolean); }
+  function currentUserEmail(){
+    var u = window.__appAuth && window.__appAuth.currentUser;
+    return u && u.email ? u.email : "";
+  }
+
+  function renderTestForm(){
+    var sel = document.querySelector('#testForm select[name="itemId"]');
+    var current = sel.value;
+    var items = state.inventory.slice().sort(function(a,b){ return a.model.localeCompare(b.model); });
+    sel.innerHTML = '<option value="">Select item…</option>' +
+      items.map(function(i){ return '<option value="'+esc(i.id)+'">'+esc(i.model)+' — '+(i.stock||0)+' on hand</option>'; }).join("");
+    if(current) sel.value = current;
+    var by = document.getElementById("testRequestedBy");
+    by.defaultValue = currentUserEmail();
+    by.value = currentUserEmail();
+  }
+
+  // Re-reads the item from Firestore (not the on-screen copy) so two people can't both take the last units.
+  async function takeOutOfStock(itemId, qty, serials){
+    var ref = db.doc("inventory/"+itemId);
+    var snap = await ref.get();
+    if(!snap.exists) throw new Error("That item is no longer in the inventory list.");
+    var cur = snap.data();
+    var stock = cur.stock || 0;
+    if(qty > stock) throw new Error("Only " + stock + " of " + cur.model + " on hand — reduce the quantity.");
+    var remove = {}; serials.forEach(function(s){ remove[s] = true; });
+    await ref.update({
+      stock: stock - qty,
+      serials: (cur.serials || []).filter(function(s){ return !remove[s]; }),
+      updatedAt: new Date().toISOString()
+    });
+    return cur.model;
+  }
+
+  function wireTestForm(){
+    var form = document.getElementById("testForm");
+    var msg = document.getElementById("testMsg");
+    var card = document.getElementById("testFormCard");
+    var toggle = document.getElementById("testToggle");
+    var today = new Date().toISOString().slice(0,10);
+    form.elements.date.value = today;
+
+    function say(text, kind){ msg.textContent = text; msg.className = "formmsg" + (kind ? " " + kind : ""); }
+
+    toggle.addEventListener("click", function(){
+      card.hidden = !card.hidden;
+      toggle.setAttribute("aria-pressed", String(!card.hidden));
+      if(!card.hidden) renderTestForm();
+    });
+
+    form.addEventListener("submit", async function(e){
+      e.preventDefault();
+      var btn = document.getElementById("testSubmit");
+      var email = currentUserEmail();
+      if(!db || !email){ say("Not connected — sign in again and retry.", "err"); return; }
+      var data = {}; new FormData(form).forEach(function(v,k){ data[k] = v; });
+      var qty = parseInt(data.qty,10) || 0;
+      var serials = splitSerials(data.serials);
+      if(!data.itemId){ say("Pick an item from the inventory list.", "err"); return; }
+      if(qty < 1){ say("Quantity must be at least 1.", "err"); return; }
+      if(serials.length !== qty){ say("Serial numbers required: enter exactly " + qty + " serial number(s).", "err"); return; }
+
+      btn.disabled = true; say("Filing request…");
+      try{
+        var model = await takeOutOfStock(data.itemId, qty, serials);
+        var now = new Date().toISOString();
+        await db.collection("test_requests").add({
+          requestDate: data.date, customer: data.customer.trim(), po: (data.po||"").trim(),
+          requestedBy: email,
+          lines: [{ itemId: data.itemId, itemLabel: model, qty: qty, serials: serials }],
+          status: "On going", statusHistory: [{ status: "On going", at: now }], deliveryId: "",
+          createdAt: now, updatedAt: now
+        });
+        form.reset();
+        form.elements.date.value = today;
+        renderTestForm();
+        say("Request filed — " + qty + " × " + model + " taken out of stock.", "ok");
+      }catch(err){
+        say(err && err.message ? err.message : "Couldn't file the request — try again.", "err");
+      }
+      btn.disabled = false;
+    });
+  }
+
+  function renderAll(){ renderLogistics(); renderInventory(); renderTestForm(); }
 
   function setSync(ok, label){
     var badge = document.getElementById("modeBadge");
@@ -291,7 +433,6 @@
   var dbSubscribed = false;
   async function initDb(){
     if(dbSubscribed) return;
-    var db;
     try{ db = await window.__appDbReady; }catch(e){ setSync(false); return; }
     dbSubscribed = true;
     setSync(true);
@@ -410,6 +551,7 @@
     updateAsOfDate();
     setInterval(updateAsOfDate, 60000);
     document.getElementById("inventorySearch").addEventListener("input", renderInventory);
+    wireTestForm();
     initAuth();
   }
   if(document.readyState === "loading"){ document.addEventListener("DOMContentLoaded", setup); } else { setup(); }
