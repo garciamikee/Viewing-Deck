@@ -11,13 +11,18 @@ It shows:
 - **Logistics dashboard** — For Delivery / In Transit / Delivered counts for
   client deliveries, click a card to see the entries.
 - **Request for testing** — a clickable option that opens a short form:
-  request date, customer name, PO / RFQ no., item (dropdown from the
-  inventory list), quantity and serial number(s). "Requested by" is filled
-  from the signed-in email and can't be changed. Filing a request takes the
-  units out of stock straight away (the stock is re-read from the database
-  at that moment, so two people can't both take the last units) and creates
-  a record in the main system, where its status is managed (On going →
-  Passed / Returned).
+  request date, customer name, PO / RFQ no., and one or more items (a
+  **single item / multiple items** toggle, like the check-out form), each
+  with an item from the inventory list, quantity and serial number(s).
+  "Requested by" is filled from the signed-in email and can't be changed.
+  Filing a request takes the units out of stock straight away (stock is
+  re-read from the database at that moment, so two people can't both take the
+  last units) and creates a record in the main system, where its status is
+  managed (On going → Passed / Returned).
+- **Testing requests** — a read-only list of every request (customer, PO/RFQ,
+  items with serials, who filed it, status) with a search box. It's there so
+  people can check before filing. The form also refuses a serial number that's
+  already on another request.
 - **Inventory list** — every SKU and its current stock, with search.
 
 ## Setup
