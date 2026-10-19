@@ -11,7 +11,7 @@ It shows:
 - **Logistics dashboard** — For Delivery / In Transit / Delivered counts for
   client deliveries, click a card to see the entries.
 - **Request for testing** — a clickable option that opens a short form:
-  request date, customer name, a required **Reference** attachment (emailed to mg@1wan.ph), and one or more items (a
+  request date, customer name, a required **Reference** attachment, and one or more items (a
   **single item / multiple items** toggle, like the check-out form), each
   with an item from the inventory list, quantity and serial number(s).
   "Requested by" is filled from the signed-in email and can't be changed.
@@ -63,13 +63,3 @@ handed to literally anyone on the internet, only to people with a company
 account. That was a deliberate trade-off: the alternative (open read access
 to anyone with the link) would also expose customer names, PO numbers and
 delivery routes to the open internet.
-
-## Emailing the Reference attachment
-
-The Request for Testing form emails its Reference attachment to mg@1wan.ph
-through the serverless function in the main system's project
-(`https://inventory-rust-nine.vercel.app/api/send-reference`). Nothing to set
-up here — but the function needs `RESEND_API_KEY` configured on the main
-system's Vercel project (see its README). If you move the main system to a
-different URL, update `REFERENCE_ENDPOINT` in `index.html` and the allowed
-origins in `api/send-reference.js`.
