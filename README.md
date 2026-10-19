@@ -11,7 +11,7 @@ It shows:
 - **Logistics dashboard** — For Delivery / In Transit / Delivered counts for
   client deliveries, click a card to see the entries.
 - **Request for testing** — a clickable option that opens a short form:
-  request date, customer name, PO / RFQ no., and one or more items (a
+  request date, customer name, a required **Reference** attachment (emailed to mg@1wan.ph), and one or more items (a
   **single item / multiple items** toggle, like the check-out form), each
   with an item from the inventory list, quantity and serial number(s).
   "Requested by" is filled from the signed-in email and can't be changed.
@@ -19,7 +19,7 @@ It shows:
   re-read from the database at that moment, so two people can't both take the
   last units) and creates a record in the main system, where its status is
   managed (On going → Passed / Returned).
-- **Testing requests** — a read-only list of every request (customer, PO/RFQ,
+- **Testing requests** — a read-only list of every request (customer, reference,
   items with serials, who filed it, status) with a search box. It's there so
   people can check before filing. The form also refuses a serial number that's
   already on another request.
@@ -63,3 +63,13 @@ handed to literally anyone on the internet, only to people with a company
 account. That was a deliberate trade-off: the alternative (open read access
 to anyone with the link) would also expose customer names, PO numbers and
 delivery routes to the open internet.
+
+## Emailing the Reference attachment
+
+The Request for Testing form emails its Reference attachment to mg@1wan.ph
+through the serverless function in the main system's project
+(`https://inventory-rust-nine.vercel.app/api/send-reference`). Nothing to set
+up here — but the function needs `RESEND_API_KEY` configured on the main
+system's Vercel project (see its README). If you move the main system to a
+different URL, update `REFERENCE_ENDPOINT` in `index.html` and the allowed
+origins in `api/send-reference.js`.
