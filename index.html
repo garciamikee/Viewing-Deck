@@ -226,6 +226,7 @@
         <div class="formgrid">
           <div class="field"><label>Request date</label><input name="date" type="date" required></div>
           <div class="field"><label>Customer name</label><input name="customer" required placeholder="e.g. Infinivan"></div>
+          <div class="field"><label>Assigned technical</label><input name="technical" required list="technicalList" placeholder="Name of the technical" autocomplete="off"><datalist id="technicalList"></datalist></div>
           <div class="field"><label>Reference (attachment)</label><input id="testReference" name="reference" type="file" required accept=".pdf,.png,.jpg,.jpeg,.doc,.docx,.xls,.xlsx,.csv,.txt,.eml,.msg"><div style="font-size:11.5px;color:var(--muted);margin-top:4px;">Required. Name the file after the PO/RFQ no. (e.g. RFQ-2026-014.pdf). Max 3 MB.</div></div>
           <div class="field"><label>Requested by</label><input id="testRequestedBy" readonly placeholder="Your sign-in email"></div>
         </div>
@@ -252,7 +253,7 @@
     <p class="lede" style="margin:-4px 0 12px;">Check here before filing — if the units are already on a request, you'll see it below. A serial number can't be on two requests.</p>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Request date</th><th>Customer</th><th>Reference</th><th>Item(s)</th><th>Requested by</th><th>Status</th></tr></thead>
+        <thead><tr><th>Request date</th><th>Customer</th><th>Reference</th><th>Assigned technical</th><th>Item(s)</th><th>Requested by</th><th>Status</th></tr></thead>
         <tbody id="testRequestsBody"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody>
       </table>
     </div>
@@ -541,6 +542,8 @@
 
   function renderTestForm(){
     document.querySelectorAll("#testLines select.line-item").forEach(fillLineSelect);
+    var techs = {}; state.testRequests.forEach(function(r){ if((r.technical||"").trim()) techs[r.technical.trim()] = true; });
+    document.getElementById("technicalList").innerHTML = Object.keys(techs).sort().map(function(n){ return "<option value=\""+esc(n)+"\">"; }).join("");
     var by = document.getElementById("testRequestedBy");
     by.defaultValue = currentUserEmail();
     by.value = currentUserEmail();
@@ -550,7 +553,7 @@
     var q = (document.getElementById("testSearch").value||"").trim().toLowerCase();
     var rows = state.testRequests.slice().sort(function(a,b){ return new Date(b.createdAt||0) - new Date(a.createdAt||0); }).filter(function(r){
       if(!q) return true;
-      var hay = [r.customer, r.po, r.requestedBy, r.deliveryId ? "checked out" : r.status];
+      var hay = [r.customer, r.po, r.technical, r.requestedBy, r.deliveryId ? "checked out" : r.status];
       getLines(r).forEach(function(l){ hay.push(modelOf(l.itemId, l.itemLabel)); hay = hay.concat(l.serials||[]); });
       return hay.join(" ").toLowerCase().indexOf(q) > -1;
     });
@@ -559,8 +562,8 @@
         var s = (l.serials||[]).join(", ");
         return '<div>'+esc(modelOf(l.itemId, l.itemLabel))+' ×'+esc(l.qty)+(s?'<div class="il-serials">'+esc(s)+'</div>':'')+'</div>';
       }).join("");
-      return '<tr><td>'+esc(fmtDate(r.requestDate))+'</td><td>'+esc(r.customer)+'</td><td class="mono">'+esc(r.po||"—")+'</td><td>'+itemsCell+'</td><td>'+esc(r.requestedBy||"—")+'</td><td>'+testPill(r)+'</td></tr>';
-    }).join("") : '<tr><td colspan="6" class="empty">'+(q ? "No matches." : "No test requests filed yet.")+'</td></tr>';
+      return '<tr><td>'+esc(fmtDate(r.requestDate))+'</td><td>'+esc(r.customer)+'</td><td class="mono">'+esc(r.po||"—")+'</td><td>'+esc(r.technical||"—")+'</td><td>'+itemsCell+'</td><td>'+esc(r.requestedBy||"—")+'</td><td>'+testPill(r)+'</td></tr>';
+    }).join("") : '<tr><td colspan="7" class="empty">'+(q ? "No matches." : "No test requests filed yet.")+'</td></tr>';
   }
 
   function wireTestForm(){
@@ -618,7 +621,7 @@
         var units = 0;
         var lines = read.lines.map(function(l){ units += l.qty; return { itemId:l.itemId, itemLabel:labels[l.itemId], qty:l.qty, serials:l.serials }; });
         await db.collection("test_requests").add(Object.assign({
-          requestDate: data.date, customer: data.customer.trim(), po: referenceNumber(refFile.name),
+          requestDate: data.date, customer: data.customer.trim(), technical: (data.technical||"").trim(), po: referenceNumber(refFile.name),
           requestedBy: email, lines: lines,
           status: "On going", statusHistory: [{ status: "On going", at: now }], deliveryId: "",
           createdAt: now, updatedAt: now

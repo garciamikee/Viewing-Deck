@@ -11,7 +11,7 @@ It shows:
 - **Logistics dashboard** — For Delivery / In Transit / Delivered counts for
   client deliveries, click a card to see the entries.
 - **Request for testing** — a clickable option that opens a short form:
-  request date, customer name, a required **Reference** file (named after the PO/RFQ no.), and one or more items (a
+  request date, customer name, a required **Reference** file (named after the PO/RFQ no.), a required **assigned technical**, and one or more items (a
   **single item / multiple items** toggle, like the check-out form), each
   with an item from the inventory list, quantity and serial number(s).
   "Requested by" is filled from the signed-in email and can't be changed.
