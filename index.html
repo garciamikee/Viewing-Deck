@@ -132,6 +132,7 @@
   .table-wrap.scroll-y::-webkit-scrollbar{ width:10px; }
   .table-wrap.scroll-y::-webkit-scrollbar-track{ background:var(--surface-2); }
   .table-wrap.scroll-y::-webkit-scrollbar-thumb{ background:var(--accent); border-radius:6px; }
+  .table-wrap.scroll-y.scroll-auto{ overflow-y:auto; } /* scrollbar only when the rows overflow */
   .table-wrap.compact table{ font-size:12.5px; }
   .table-wrap.compact thead th{ padding:6px 12px; z-index:1; }
   .table-wrap.compact tbody td{ padding:4px 12px; vertical-align:middle; }
@@ -144,7 +145,7 @@
 
   .pill{ display:inline-flex; align-items:center; gap:5px; font-size:11.5px; font-weight:700; padding:3px 9px; border-radius:99px; white-space:nowrap; color:#ffffff; }
   .pill.good{ background:var(--good); } .pill.warn{ background:var(--warn); }
-  .pill.bad{ background:var(--bad); } .pill.accentpill{ background:var(--accent); }
+  .pill.bad{ background:var(--bad); } .pill.accentpill{ background:var(--accent); } .pill.incomplete{ background:#7c5cd6; }
 
   .note{ background:var(--surface-2); border:1px solid var(--line); border-radius:12px; padding:14px 16px; font-size:12.5px; color:var(--muted); margin-top:6px; line-height:1.55; }
   .note b{ color:var(--ink); }
@@ -218,7 +219,7 @@
     </div>
     <p class="lede" style="margin:-4px 0 12px;">Deliveries to clients, by status — click a card to list its entries, or search across all of them.</p>
     <div class="dash-cards" id="logisticsCards"></div>
-    <div class="table-wrap" id="logisticsDetailWrap" hidden style="margin-top:12px;">
+    <div class="table-wrap compact scroll-y scroll-auto" id="logisticsDetailWrap" hidden style="margin-top:12px;">
       <table>
         <thead><tr><th>Date</th><th>Customer</th><th>PO</th><th>Item(s)</th><th>Courier</th><th>Tracking / AWB</th><th>Received</th><th>Status</th></tr></thead>
         <tbody id="logisticsDetailBody"></tbody>
@@ -270,7 +271,7 @@
     <p class="lede" style="margin:-4px 0 12px;">Who is testing what. Click a technical's card to filter. Only the technical a request is assigned to can change its testing status or upload its PDI (pre-delivery inspection) report; the main system downloads the PDI.</p>
     <div class="dash-cards" id="techCards"></div>
     <div class="note" id="techWho" style="margin:12px 0;"></div>
-    <div class="table-wrap">
+    <div class="table-wrap compact scroll-y scroll-auto">
       <table>
         <thead><tr><th>Assigned technical</th><th>Customer</th><th>Item</th><th>Qty</th><th>Serial no.</th><th>Testing status</th><th>PDI</th></tr></thead>
         <tbody id="techBody"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
@@ -285,7 +286,7 @@
       <label class="search"><span aria-hidden="true">⌕</span><input id="testSearch" type="text" placeholder="Search customer, PO, item, serial…"></label>
     </div>
     <p class="lede" style="margin:-4px 0 12px;">Check here before filing — if the units are already on a request, you'll see it below. A serial number can't be on two requests.</p>
-    <div class="table-wrap">
+    <div class="table-wrap compact scroll-y scroll-auto">
       <table>
         <thead><tr><th>Request date</th><th>Customer</th><th>Reference</th><th>Assigned technical</th><th>Item(s)</th><th>Requested by</th><th>Status</th></tr></thead>
         <tbody id="testRequestsBody"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody>
@@ -493,8 +494,13 @@
     if(r.deliveryId) return '<span class="pill accentpill">Checked out</span>';
     if(r.status === "Passed") return '<span class="pill good">Passed</span>';
     if(r.status === "Returned") return '<span class="pill neutral">Returned</span>';
+    if(r.status === "Incomplete") return '<span class="pill incomplete">Incomplete</span>';
+    if(r.status === "Defective") return '<span class="pill bad">Defective</span>';
     return '<span class="pill warn">On going</span>';
   }
+  // Statuses a test can move to from its current one. Defective is final: the units stay out of stock.
+  var TEST_NEXT = { "On going":["Passed","Incomplete","Defective","Returned"], "Incomplete":["Passed","Defective","Returned"], "Passed":["Returned"] };
+  var TEST_SET_LABEL = { "Passed":"Mark Passed", "Incomplete":"Mark Incomplete", "Defective":"Mark Defective", "Returned":"Mark Returned" };
 
   // ---- line editor (single item / multiple items) ----
   function fillLineSelect(sel){
@@ -650,8 +656,9 @@
     var html = testPill(r);
     if(isAssignedTech(r) && !r.deliveryId){
       var b = "";
-      if(r.status === "On going") b += '<button type="button" class="btn small" data-tech-set="Passed" data-tech-id="'+esc(r.id)+'">Mark Passed</button>';
-      if(r.status === "On going" || r.status === "Passed") b += '<button type="button" class="btn ghost small" data-tech-set="Returned" data-tech-id="'+esc(r.id)+'">Mark Returned</button>';
+      (TEST_NEXT[r.status] || []).forEach(function(s){
+        b += '<button type="button" class="btn '+(s === "Passed" ? "" : "ghost ")+'small" data-tech-set="'+s+'" data-tech-id="'+esc(r.id)+'">'+TEST_SET_LABEL[s]+'</button>';
+      });
       if(b) html += '<div class="row-actions">'+b+'</div>';
     }
     return html;
@@ -668,12 +675,15 @@
   function renderTechnical(){
     var reqs = state.testRequests.slice().sort(function(a,b){ return new Date(b.createdAt||0) - new Date(a.createdAt||0); });
     var groups = {};
-    TECHNICALS.forEach(function(t){ groups[t.name] = {units:0, ongoing:0, passed:0, returned:0}; });
+    var blank = function(){ return {units:0, ongoing:0, incomplete:0, passed:0, defective:0, returned:0}; };
+    TECHNICALS.forEach(function(t){ groups[t.name] = blank(); });
     reqs.forEach(function(r){
-      var g = groups[techName(r)] = groups[techName(r)] || {units:0, ongoing:0, passed:0, returned:0};
+      var g = groups[techName(r)] = groups[techName(r)] || blank();
       var u = sumQty(getLines(r));
       if(r.deliveryId) return;
       if(r.status === "Returned") g.returned++;
+      else if(r.status === "Defective") g.defective++;
+      else if(r.status === "Incomplete"){ g.incomplete++; g.units += u; }
       else if(r.status === "Passed"){ g.passed++; g.units += u; }
       else { g.ongoing++; g.units += u; }
     });
@@ -688,7 +698,7 @@
       var g = groups[n];
       return '<button type="button" class="dash-card" data-tech="'+esc(n)+'" aria-pressed="'+(techFilter===n)+'">'+
         '<div class="dc-label">'+esc(n)+'</div><div class="dc-value">'+g.units+'</div>'+
-        '<div class="dc-hint">units out · '+g.ongoing+' on going · '+g.passed+' passed · '+g.returned+' returned</div></button>';
+        '<div class="dc-hint">units out · '+g.ongoing+' on going · '+g.incomplete+' incomplete · '+g.passed+' passed · '+g.defective+' defective · '+g.returned+' returned</div></button>';
     }).join("");
 
     var me = currentUserEmail(), meTech = TECHNICALS.find(function(t){ return t.email === me.toLowerCase(); });
@@ -733,13 +743,16 @@
     try{
       var rec = await freshAssignedRequest(id);
       if(rec.deliveryId) throw new Error("This request has already been checked out to a delivery.");
-      var allowed = rec.status === "On going" ? ["Passed","Returned"] : rec.status === "Passed" ? ["Returned"] : [];
-      if(allowed.indexOf(newStatus) < 0) throw new Error("This request is already "+rec.status+".");
+      if((TEST_NEXT[rec.status] || []).indexOf(newStatus) < 0) throw new Error("This request is "+rec.status+" and can't be marked "+newStatus+".");
       var lines = getLines(rec);
       var label = lines.map(function(l){ return modelOf(l.itemId, l.itemLabel)+" ×"+l.qty; }).join(", ");
-      var ok = await askConfirm(newStatus === "Returned"
-        ? "Mark this test as Returned?\n"+label+" will go back into the inventory list."
-        : "Mark this test as Passed?\n"+label+" can then be checked out for delivery.", newStatus === "Returned" ? "Mark returned" : "Mark passed");
+      var confirmText = {
+        "Returned":"Mark this test as Returned?\n"+label+" will go back into the inventory list.",
+        "Passed":"Mark this test as Passed?\n"+label+" can then be checked out for delivery.",
+        "Incomplete":"Mark this test as Incomplete?\nThe test isn't finished — "+label+" stays out of stock and can still be marked Passed, Defective or Returned.",
+        "Defective":"Mark this test as Defective?\n"+label+" stays out of stock (it is not added back to the inventory list)."
+      };
+      var ok = await askConfirm(confirmText[newStatus], TEST_SET_LABEL[newStatus]);
       if(!ok) return;
       var now = new Date().toISOString();
       var upd = { status:newStatus, statusHistory:(rec.statusHistory||[]).concat([{status:newStatus, at:now, by:currentUserEmail()}]), updatedAt:now };

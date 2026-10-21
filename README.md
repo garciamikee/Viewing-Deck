@@ -9,7 +9,7 @@ a **Request for Testing**.
 
 It shows:
 - **Logistics dashboard** — (with a search box across customer, PO, item, serial, tracking) For Delivery / In Transit / Delivered counts for
-  client deliveries, click a card to see the entries.
+  client deliveries, click a card to see the entries (compact table, scrolls when long).
 - **Request for testing** — a clickable option that opens a short form:
   request date, customer name, a required **Reference** file (named after the PO/RFQ no.), a required **assigned technical** (dropdown), and one or more items (a
   **single item / multiple items** toggle, like the check-out form), each
@@ -18,11 +18,11 @@ It shows:
   Filing a request takes the units out of stock straight away (stock is
   re-read from the database at that moment, so two people can't both take the
   last units) and creates a record in the main system, where its status is
-  managed (On going → Passed / Returned).
+  managed (On going → Passed / Incomplete / Defective / Returned).
 - **Testing requests** — a read-only list of every request (customer, reference,
   items with serials, who filed it, status) with a search box. It's there so
   people can check before filing. The form also refuses a serial number that's
-  already on another request.
+  already on another request. Compact table that scrolls when long.
 - **Inventory list** — every SKU and its current stock, with search. Compact rows in a fixed-height box with a scroll bar on the side.
 
 ## Setup
@@ -74,3 +74,22 @@ main system downloads the PDI once, which removes it. Technicals and emails
 are listed in `TECHNICALS` in `index.html` (keep in step with the main
 system). See the main system's README for details and the limits of this
 protection.
+
+## Testing status
+
+The assigned technical (and only them) can set a request to **Passed**,
+**Incomplete**, **Defective** or **Returned** from the Technical dashboard:
+
+| From | Can go to |
+| --- | --- |
+| On going | Passed, Incomplete, Defective, Returned |
+| Incomplete | Passed, Defective, Returned |
+| Passed | Returned |
+
+- **Incomplete** — the test isn't finished. The units stay out of stock and
+  still count as units out for testing.
+- **Defective** — the units failed. They stay out of stock (they are **not**
+  added back to the inventory list) and the status is final.
+- **Returned** — puts the units back in stock, as before.
+
+All tables on the deck are compact and show a scroll bar when they overflow.
