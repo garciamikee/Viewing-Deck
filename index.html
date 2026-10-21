@@ -127,6 +127,15 @@
   thead th{ text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); font-weight:600; padding:10px 14px; border-bottom:1px solid var(--line); background:var(--surface-2); position:sticky; top:0; }
   tbody td{ padding:10px 14px; border-bottom:1px solid var(--line); vertical-align:top; color:var(--ink); }
   tbody tr:last-child td{ border-bottom:none; }
+  /* Compact, scrollable list: fixed height with an always-visible scrollbar on the side, header stays put. */
+  .table-wrap.scroll-y{ max-height:340px; overflow-y:scroll; scrollbar-width:thin; scrollbar-color:var(--accent) var(--surface-2); }
+  .table-wrap.scroll-y::-webkit-scrollbar{ width:10px; }
+  .table-wrap.scroll-y::-webkit-scrollbar-track{ background:var(--surface-2); }
+  .table-wrap.scroll-y::-webkit-scrollbar-thumb{ background:var(--accent); border-radius:6px; }
+  .table-wrap.compact table{ font-size:12.5px; }
+  .table-wrap.compact thead th{ padding:6px 12px; z-index:1; }
+  .table-wrap.compact tbody td{ padding:4px 12px; vertical-align:middle; }
+  .table-wrap.compact .specs-sub{ display:inline; margin:0 0 0 8px; }
   tbody tr:hover{ background:var(--surface-2); }
   td.num{ font-family:"IBM Plex Mono",monospace; font-variant-numeric: tabular-nums; text-align:right; }
   td.mono{ font-family:"IBM Plex Mono",monospace; font-variant-numeric: tabular-nums; }
@@ -203,7 +212,11 @@
   </header>
 
   <section class="block">
-    <div class="block-head"><h2>Logistics dashboard</h2><span class="hint">deliveries to clients, by status — click a card</span></div>
+    <div class="block-head">
+      <h2>Logistics dashboard</h2>
+      <label class="search"><span aria-hidden="true">⌕</span><input id="logisticsSearch" type="text" placeholder="Search customer, PO, item, serial, tracking…"></label>
+    </div>
+    <p class="lede" style="margin:-4px 0 12px;">Deliveries to clients, by status — click a card to list its entries, or search across all of them.</p>
     <div class="dash-cards" id="logisticsCards"></div>
     <div class="table-wrap" id="logisticsDetailWrap" hidden style="margin-top:12px;">
       <table>
@@ -285,7 +298,7 @@
       <h2>Inventory list</h2>
       <label class="search"><span aria-hidden="true">⌕</span><input id="inventorySearch" type="text" placeholder="Search model or category…"></label>
     </div>
-    <div class="table-wrap">
+    <div class="table-wrap compact scroll-y" id="inventoryScroll">
       <table>
         <thead><tr><th>Model</th><th>Category</th><th>Location</th><th>Stock</th><th>Status</th></tr></thead>
         <tbody id="inventoryBody"><tr><td colspan="5" class="empty">Loading…</td></tr></tbody>
@@ -377,12 +390,19 @@
     }).join("");
 
     var wrap = document.getElementById("logisticsDetailWrap"), body = document.getElementById("logisticsDetailBody");
-    if(logFilter){
-      var rows = deliveries.filter(function(d){ return d.status === logFilter; })
+    var lq = (document.getElementById("logisticsSearch").value||"").trim().toLowerCase();
+    if(logFilter || lq){
+      var rows = deliveries.filter(function(d){
+        if(logFilter && d.status !== logFilter) return false;
+        if(!lq) return true;
+        var hay = [d.customer, d.po, d.courier, d.trackingNo, d.status, d.date, d.receivedDate];
+        getLines(d).forEach(function(l){ hay.push(modelOf(l.itemId, l.itemLabel)); hay = hay.concat(l.serials||[]); });
+        return hay.join(" ").toLowerCase().indexOf(lq) > -1;
+      })
         .sort(function(a,b){ return new Date(b.createdAt||0)-new Date(a.createdAt||0); });
       body.innerHTML = rows.length ? rows.map(function(d){
         return '<tr><td>'+esc(fmtDate(d.date))+'</td><td>'+esc(d.customer)+'</td><td>'+esc(d.po||"—")+'</td><td>'+linesLabel(getLines(d))+'</td><td>'+esc(d.courier||"—")+'</td><td class="mono">'+esc(d.trackingNo||"—")+'</td><td>'+esc(fmtDate(d.receivedDate))+'</td><td>'+deliveryPill(d.status)+'</td></tr>';
-      }).join("") : '<tr><td colspan="8" class="empty">No entries in this status.</td></tr>';
+      }).join("") : '<tr><td colspan="8" class="empty">'+(lq ? "No matches." : "No entries in this status.")+'</td></tr>';
       wrap.hidden = false;
     } else { wrap.hidden = true; }
   }
@@ -1000,6 +1020,7 @@
     updateAsOfDate();
     setInterval(updateAsOfDate, 60000);
     document.getElementById("inventorySearch").addEventListener("input", renderInventory);
+    document.getElementById("logisticsSearch").addEventListener("input", renderLogistics);
     document.getElementById("testSearch").addEventListener("input", renderTestRequests);
     wireTestForm();
     wireTechnical();

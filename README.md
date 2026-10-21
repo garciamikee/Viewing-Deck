@@ -8,7 +8,7 @@ screens**. Meant to be handed out broadly inside the company for visibility
 a **Request for Testing**.
 
 It shows:
-- **Logistics dashboard** — For Delivery / In Transit / Delivered counts for
+- **Logistics dashboard** — (with a search box across customer, PO, item, serial, tracking) For Delivery / In Transit / Delivered counts for
   client deliveries, click a card to see the entries.
 - **Request for testing** — a clickable option that opens a short form:
   request date, customer name, a required **Reference** file (named after the PO/RFQ no.), a required **assigned technical** (dropdown), and one or more items (a
@@ -23,7 +23,7 @@ It shows:
   items with serials, who filed it, status) with a search box. It's there so
   people can check before filing. The form also refuses a serial number that's
   already on another request.
-- **Inventory list** — every SKU and its current stock, with search.
+- **Inventory list** — every SKU and its current stock, with search. Compact rows in a fixed-height box with a scroll bar on the side.
 
 ## Setup
 
