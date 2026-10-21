@@ -142,6 +142,10 @@
 
   .btn{ border:none; border-radius:8px; padding:9px 16px; font-size:13px; font-weight:700; cursor:pointer; background:var(--accent); color:#ffffff; }
   .btn:disabled{ opacity:.45; cursor:not-allowed; }
+  .btn.small{ padding:5px 10px; font-size:12px; }
+  .btn.ghost{ background:none; border:1px solid var(--line); color:var(--ink); }
+  .btn.ghost:hover{ border-color:var(--accent); }
+  .row-actions{ display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-top:6px; }
 
   .modal-overlay{ position:fixed; inset:0; background:rgba(0,0,0,.65); display:flex; align-items:center; justify-content:center; z-index:100; padding:20px; }
   .modal-box{ background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:22px; max-width:420px; width:100%; box-shadow:var(--shadow); text-align:center; }
@@ -226,7 +230,7 @@
         <div class="formgrid">
           <div class="field"><label>Request date</label><input name="date" type="date" required></div>
           <div class="field"><label>Customer name</label><input name="customer" required placeholder="e.g. Infinivan"></div>
-          <div class="field"><label>Assigned technical</label><input name="technical" required list="technicalList" placeholder="Name of the technical" autocomplete="off"><datalist id="technicalList"></datalist></div>
+          <div class="field"><label>Assigned technical</label><select name="technical" id="testTechnical" required></select></div>
           <div class="field"><label>Reference (attachment)</label><input id="testReference" name="reference" type="file" required accept=".pdf,.png,.jpg,.jpeg,.doc,.docx,.xls,.xlsx,.csv,.txt,.eml,.msg"><div style="font-size:11.5px;color:var(--muted);margin-top:4px;">Required. Name the file after the PO/RFQ no. (e.g. RFQ-2026-014.pdf). Max 3 MB.</div></div>
           <div class="field"><label>Requested by</label><input id="testRequestedBy" readonly placeholder="Your sign-in email"></div>
         </div>
@@ -243,6 +247,23 @@
         </div>
       </form>
     </div>
+  </section>
+
+  <section class="block" id="technicalSection">
+    <div class="block-head">
+      <h2>Technical dashboard</h2>
+      <label class="search"><span aria-hidden="true">⌕</span><input id="techSearch" type="text" placeholder="Search technical, customer, item, serial…"></label>
+    </div>
+    <p class="lede" style="margin:-4px 0 12px;">Who is testing what. Click a technical's card to filter. Only the technical a request is assigned to can change its testing status or upload its PDI (pre-delivery inspection) report; the main system downloads the PDI.</p>
+    <div class="dash-cards" id="techCards"></div>
+    <div class="note" id="techWho" style="margin:12px 0;"></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Assigned technical</th><th>Customer</th><th>Item</th><th>Qty</th><th>Serial no.</th><th>Testing status</th><th>PDI</th></tr></thead>
+        <tbody id="techBody"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
+      </table>
+    </div>
+    <input type="file" id="pdiFile" hidden accept=".pdf,.png,.jpg,.jpeg,.doc,.docx,.xls,.xlsx,.csv,.txt,.eml,.msg">
   </section>
 
   <section class="block">
@@ -272,7 +293,17 @@
     </div>
   </section>
 
-  <div class="note">Live view — this list and dashboard update automatically as items are checked in, checked out, and delivered. The only thing you can do from here is file a request for testing; everything else is managed in the main system.</div>
+  <div class="note">Live view — this list and dashboard update automatically as items are checked in, checked out, and delivered. From here you can file a request for testing, and the technical assigned to a request can update its testing status and upload its PDI; everything else is managed in the main system.</div>
+</div>
+
+<div class="modal-overlay" id="confirmModal" hidden>
+  <div class="modal-box">
+    <p id="confirmModalText" style="white-space:pre-line;color:var(--ink);margin-bottom:18px;"></p>
+    <div style="display:flex;gap:10px;justify-content:center;">
+      <button type="button" class="btn" id="confirmModalYes">OK</button>
+      <button type="button" class="btn ghost" id="confirmModalNo">Cancel</button>
+    </div>
+  </div>
 </div>
 
 <div class="modal-overlay" id="authGate">
@@ -406,8 +437,8 @@
       try{ await db.doc("request_files/"+id+"_"+i).delete(); }catch(e){ /* best effort */ }
     }
   }
-  // Stores the file and returns the fields to put on the request record.
-  async function saveAttachment(file){
+  // Stores a file in small pieces and returns {id, chunks, name, type, size}.
+  async function storeFile(file){
     var b64 = await readFileBase64(file);
     var id = Date.now().toString(36) + Math.random().toString(36).slice(2,8);
     var chunks = Math.max(1, Math.ceil(b64.length / REFERENCE_CHUNK));
@@ -417,10 +448,23 @@
       }
     }catch(e){
       await deleteAttachment(id, chunks);
-      throw new Error("Couldn't upload the attachment — try again.");
+      throw new Error("Couldn't upload the file — try again.");
     }
-    return { attachmentId:id, attachmentChunks:chunks, attachmentName:file.name, attachmentType:file.type||"application/octet-stream", attachmentSize:file.size };
+    return { id:id, chunks:chunks, name:file.name, type:file.type||"application/octet-stream", size:file.size };
   }
+  function attachmentFields(f){ return { attachmentId:f.id, attachmentChunks:f.chunks, attachmentName:f.name, attachmentType:f.type, attachmentSize:f.size }; }
+  function pdiFields(f){ return { pdiId:f.id, pdiChunks:f.chunks, pdiName:f.name, pdiType:f.type, pdiSize:f.size }; }
+  async function saveAttachment(file){ return attachmentFields(await storeFile(file)); }
+
+  // The technicals who can be assigned to a test request. Each can change the status and upload the PDI,
+  // but only for requests assigned to them (matched on their sign-in email).
+  var TECHNICALS = [
+    {name:"Mj", email:"mjg@1wan.ph"}, {name:"Kristian", email:"kv@1wan.ph"}, {name:"Robin", email:"js@1wan.ph"},
+    {name:"Kevin", email:"kb@1wan.ph"}, {name:"Renz", email:"rt@1wan.ph"}, {name:"Mavs", email:"mf@1wan.ph"}
+  ];
+  function technicalEmailFor(name){ var t = TECHNICALS.find(function(x){ return x.name === name; }); return t ? t.email : ""; }
+  function requestTechEmail(r){ return String(r.technicalEmail || technicalEmailFor((r.technical||"").trim()) || "").toLowerCase(); }
+  function isAssignedTech(r){ var me = currentUserEmail().toLowerCase(); return !!me && requestTechEmail(r) === me; }
   function modelOf(id, fallback){
     var it = state.inventory.find(function(i){ return i.id === id; });
     return it ? it.model : (fallback || id || "—");
@@ -542,8 +586,6 @@
 
   function renderTestForm(){
     document.querySelectorAll("#testLines select.line-item").forEach(fillLineSelect);
-    var techs = {}; state.testRequests.forEach(function(r){ if((r.technical||"").trim()) techs[r.technical.trim()] = true; });
-    document.getElementById("technicalList").innerHTML = Object.keys(techs).sort().map(function(n){ return "<option value=\""+esc(n)+"\">"; }).join("");
     var by = document.getElementById("testRequestedBy");
     by.defaultValue = currentUserEmail();
     by.value = currentUserEmail();
@@ -566,7 +608,187 @@
     }).join("") : '<tr><td colspan="7" class="empty">'+(q ? "No matches." : "No test requests filed yet.")+'</td></tr>';
   }
 
+  // ---- Technical dashboard ----
+  var techFilter = null;
+  function techName(r){ return (r.technical||"").trim() || "Unassigned"; }
+  function sumQty(lines){ return lines.reduce(function(s,l){ return s + (parseInt(l.qty,10)||0); }, 0); }
+
+  function askConfirm(text, yesLabel){
+    return new Promise(function(resolve){
+      var overlay = document.getElementById("confirmModal"), yes = document.getElementById("confirmModalYes"), no = document.getElementById("confirmModalNo");
+      document.getElementById("confirmModalText").textContent = text;
+      yes.textContent = yesLabel || "OK"; no.hidden = yesLabel === null;
+      overlay.hidden = false;
+      function done(v){ overlay.hidden = true; yes.removeEventListener("click", onYes); no.removeEventListener("click", onNo); resolve(v); }
+      function onYes(){ done(true); } function onNo(){ done(false); }
+      yes.addEventListener("click", onYes); no.addEventListener("click", onNo);
+    });
+  }
+  function notify(text){ return askConfirm(text, null); } // message with a single OK button
+
+  function techStatusCell(r){
+    var html = testPill(r);
+    if(isAssignedTech(r) && !r.deliveryId){
+      var b = "";
+      if(r.status === "On going") b += '<button type="button" class="btn small" data-tech-set="Passed" data-tech-id="'+esc(r.id)+'">Mark Passed</button>';
+      if(r.status === "On going" || r.status === "Passed") b += '<button type="button" class="btn ghost small" data-tech-set="Returned" data-tech-id="'+esc(r.id)+'">Mark Returned</button>';
+      if(b) html += '<div class="row-actions">'+b+'</div>';
+    }
+    return html;
+  }
+  function techPdiCell(r){
+    var mine = isAssignedTech(r), html;
+    if(r.pdiId) html = '<span class="pill good">PDI uploaded</span><div class="il-serials">'+esc(r.pdiName||"")+'</div>';
+    else if(r.pdiRemovedAt) html = '<span class="pill neutral" title="Downloaded once by the main system and removed">PDI downloaded</span>';
+    else html = '<span style="color:var(--muted);font-size:12.5px;">Not uploaded yet</span>';
+    if(mine) html += '<div class="row-actions"><button type="button" class="btn ghost small" data-pdi-upload="'+esc(r.id)+'">'+(r.pdiId ? "Replace PDI" : "Upload PDI")+'</button></div>';
+    return html;
+  }
+
+  function renderTechnical(){
+    var reqs = state.testRequests.slice().sort(function(a,b){ return new Date(b.createdAt||0) - new Date(a.createdAt||0); });
+    var groups = {};
+    TECHNICALS.forEach(function(t){ groups[t.name] = {units:0, ongoing:0, passed:0, returned:0}; });
+    reqs.forEach(function(r){
+      var g = groups[techName(r)] = groups[techName(r)] || {units:0, ongoing:0, passed:0, returned:0};
+      var u = sumQty(getLines(r));
+      if(r.deliveryId) return;
+      if(r.status === "Returned") g.returned++;
+      else if(r.status === "Passed"){ g.passed++; g.units += u; }
+      else { g.ongoing++; g.units += u; }
+    });
+    var order = TECHNICALS.map(function(t){ return t.name; });
+    var names = Object.keys(groups).sort(function(a,b){
+      var ia = order.indexOf(a), ib = order.indexOf(b);
+      if(ia > -1 && ib > -1) return ia - ib; if(ia > -1) return -1; if(ib > -1) return 1;
+      return a === "Unassigned" ? 1 : b === "Unassigned" ? -1 : a.localeCompare(b);
+    });
+    if(techFilter && !groups[techFilter]) techFilter = null;
+    document.getElementById("techCards").innerHTML = names.map(function(n){
+      var g = groups[n];
+      return '<button type="button" class="dash-card" data-tech="'+esc(n)+'" aria-pressed="'+(techFilter===n)+'">'+
+        '<div class="dc-label">'+esc(n)+'</div><div class="dc-value">'+g.units+'</div>'+
+        '<div class="dc-hint">units out · '+g.ongoing+' on going · '+g.passed+' passed · '+g.returned+' returned</div></button>';
+    }).join("");
+
+    var me = currentUserEmail(), meTech = TECHNICALS.find(function(t){ return t.email === me.toLowerCase(); });
+    document.getElementById("techWho").innerHTML = meTech
+      ? 'Signed in as <b>'+esc(meTech.name)+'</b> ('+esc(me)+') — you can update the status and upload the PDI for requests assigned to you.'
+      : 'Signed in as '+esc(me||"—")+' — view only. Status and PDI can be changed only by the assigned technical.';
+
+    var q = (document.getElementById("techSearch").value||"").trim().toLowerCase(), html = "";
+    reqs.forEach(function(r){
+      if(techFilter && techName(r) !== techFilter) return;
+      var lines = getLines(r);
+      if(q){
+        var hay = [techName(r), r.customer, r.po, r.deliveryId ? "checked out" : r.status];
+        lines.forEach(function(l){ hay.push(modelOf(l.itemId, l.itemLabel)); hay = hay.concat(l.serials||[]); });
+        if(hay.join(" ").toLowerCase().indexOf(q) < 0) return;
+      }
+      var span = Math.max(lines.length, 1);
+      lines.forEach(function(l, i){
+        html += '<tr>';
+        if(i === 0) html += '<td rowspan="'+span+'">'+esc(techName(r))+'</td><td rowspan="'+span+'">'+esc(r.customer)+'</td>';
+        html += '<td>'+esc(modelOf(l.itemId, l.itemLabel))+'</td><td>'+esc(l.qty)+'</td><td class="mono">'+esc((l.serials||[]).join(", ")||"—")+'</td>';
+        if(i === 0) html += '<td rowspan="'+span+'">'+techStatusCell(r)+'</td><td rowspan="'+span+'">'+techPdiCell(r)+'</td>';
+        html += '</tr>';
+      });
+    });
+    document.getElementById("techBody").innerHTML = html || '<tr><td colspan="7" class="empty">'+(q || techFilter ? "No matches." : "No test requests filed yet.")+'</td></tr>';
+  }
+
+  // Only the technical a request is assigned to may do this. It's checked against a fresh read of the
+  // request, not the on-screen copy. (This is enforced here in the page; the database rules are shared
+  // with the main system, so they can't tell a deck user from a main-system user.)
+  async function freshAssignedRequest(id){
+    var snap = await db.doc("test_requests/"+id).get();
+    if(!snap.exists) throw new Error("That request no longer exists.");
+    var rec = snap.data();
+    if(!isAssignedTech(rec)) throw new Error("Only the assigned technical ("+(rec.technical||"none")+") can do this.");
+    return rec;
+  }
+
+  async function setTechStatus(id, newStatus){
+    if(!db) return;
+    try{
+      var rec = await freshAssignedRequest(id);
+      if(rec.deliveryId) throw new Error("This request has already been checked out to a delivery.");
+      var allowed = rec.status === "On going" ? ["Passed","Returned"] : rec.status === "Passed" ? ["Returned"] : [];
+      if(allowed.indexOf(newStatus) < 0) throw new Error("This request is already "+rec.status+".");
+      var lines = getLines(rec);
+      var label = lines.map(function(l){ return modelOf(l.itemId, l.itemLabel)+" ×"+l.qty; }).join(", ");
+      var ok = await askConfirm(newStatus === "Returned"
+        ? "Mark this test as Returned?\n"+label+" will go back into the inventory list."
+        : "Mark this test as Passed?\n"+label+" can then be checked out for delivery.", newStatus === "Returned" ? "Mark returned" : "Mark passed");
+      if(!ok) return;
+      var now = new Date().toISOString();
+      var upd = { status:newStatus, statusHistory:(rec.statusHistory||[]).concat([{status:newStatus, at:now, by:currentUserEmail()}]), updatedAt:now };
+      var restored = [];
+      try{
+        if(newStatus === "Returned"){
+          upd.returnedAt = now;
+          for(var i=0;i<lines.length;i++){
+            var ref = db.doc("inventory/"+lines[i].itemId), cur = await ref.get();
+            if(!cur.exists) continue; // item since deleted from the inventory list
+            var d = cur.data();
+            await ref.update({ stock:(d.stock||0)+(parseInt(lines[i].qty,10)||0), serials:(d.serials||[]).concat(lines[i].serials||[]), updatedAt:now });
+            restored.push(i);
+          }
+        }
+        await db.doc("test_requests/"+id).update(upd);
+      }catch(err){
+        for(var u=0;u<restored.length;u++){ // put stock back the way it was
+          try{
+            var l2 = lines[restored[u]], r2 = db.doc("inventory/"+l2.itemId), c2 = (await r2.get()).data(), gone = {};
+            (l2.serials||[]).forEach(function(s){ gone[s] = true; });
+            await r2.update({ stock:Math.max(0,(c2.stock||0)-(parseInt(l2.qty,10)||0)), serials:(c2.serials||[]).filter(function(s){ return !gone[s]; }), updatedAt:new Date().toISOString() });
+          }catch(e){ /* best effort */ }
+        }
+        throw err;
+      }
+    }catch(err){ await notify("Couldn't update: " + (err && err.message ? err.message : "try again.")); }
+  }
+
+  async function uploadTechPdi(id, file){
+    if(!db || !file) return;
+    var stored = null;
+    try{
+      var problem = checkReferenceFile(file);
+      if(problem) throw new Error(problem.replace("Name the file after the PO/RFQ no. (e.g. RFQ-2026-014.pdf).", "That file name isn't usable."));
+      var rec = await freshAssignedRequest(id);
+      stored = await storeFile(file);
+      var now = new Date().toISOString();
+      await db.doc("test_requests/"+id).update(Object.assign(pdiFields(stored), { pdiUploadedBy:currentUserEmail(), pdiUploadedAt:now, pdiRemovedAt:"", pdiDownloadedBy:"", updatedAt:now }));
+      if(rec.pdiId) await deleteAttachment(rec.pdiId, rec.pdiChunks);
+      await notify("PDI uploaded: "+file.name+"\nThe main system can now download it (once).");
+    }catch(err){
+      if(stored) await deleteAttachment(stored.id, stored.chunks);
+      await notify("Couldn't upload the PDI: " + (err && err.message ? err.message : "try again."));
+    }
+  }
+
+  function wireTechnical(){
+    var pdiTargetId = null;
+    document.getElementById("techCards").addEventListener("click", function(e){
+      var card = e.target.closest("[data-tech]"); if(!card) return;
+      techFilter = (techFilter === card.dataset.tech) ? null : card.dataset.tech;
+      renderTechnical();
+    });
+    document.getElementById("techSearch").addEventListener("input", renderTechnical);
+    document.getElementById("techBody").addEventListener("click", function(e){
+      var st = e.target.closest("[data-tech-set]"), up = e.target.closest("[data-pdi-upload]");
+      if(st) setTechStatus(st.dataset.techId, st.dataset.techSet);
+      if(up){ pdiTargetId = up.dataset.pdiUpload; document.getElementById("pdiFile").click(); }
+    });
+    document.getElementById("pdiFile").addEventListener("change", async function(){
+      var file = this.files && this.files[0], id = pdiTargetId;
+      this.value = ""; pdiTargetId = null;
+      if(file && id) await uploadTechPdi(id, file);
+    });
+  }
+
   function wireTestForm(){
+    document.getElementById("testTechnical").innerHTML = '<option value="">Select technical…</option>' + TECHNICALS.map(function(t){ return '<option value="'+esc(t.name)+'">'+esc(t.name)+'</option>'; }).join("");
     var form = document.getElementById("testForm");
     var msg = document.getElementById("testMsg");
     var card = document.getElementById("testFormCard");
@@ -621,7 +843,7 @@
         var units = 0;
         var lines = read.lines.map(function(l){ units += l.qty; return { itemId:l.itemId, itemLabel:labels[l.itemId], qty:l.qty, serials:l.serials }; });
         await db.collection("test_requests").add(Object.assign({
-          requestDate: data.date, customer: data.customer.trim(), technical: (data.technical||"").trim(), po: referenceNumber(refFile.name),
+          requestDate: data.date, customer: data.customer.trim(), technical: (data.technical||"").trim(), technicalEmail: technicalEmailFor((data.technical||"").trim()), po: referenceNumber(refFile.name),
           requestedBy: email, lines: lines,
           status: "On going", statusHistory: [{ status: "On going", at: now }], deliveryId: "",
           createdAt: now, updatedAt: now
@@ -639,7 +861,7 @@
     });
   }
 
-  function renderAll(){ renderLogistics(); renderInventory(); renderTestForm(); renderTestRequests(); }
+  function renderAll(){ renderLogistics(); renderInventory(); renderTestForm(); renderTestRequests(); renderTechnical(); }
 
   function setSync(ok, label){
     var badge = document.getElementById("modeBadge");
@@ -780,6 +1002,7 @@
     document.getElementById("inventorySearch").addEventListener("input", renderInventory);
     document.getElementById("testSearch").addEventListener("input", renderTestRequests);
     wireTestForm();
+    wireTechnical();
     initAuth();
   }
   if(document.readyState === "loading"){ document.addEventListener("DOMContentLoaded", setup); } else { setup(); }

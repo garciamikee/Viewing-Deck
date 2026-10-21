@@ -11,7 +11,7 @@ It shows:
 - **Logistics dashboard** — For Delivery / In Transit / Delivered counts for
   client deliveries, click a card to see the entries.
 - **Request for testing** — a clickable option that opens a short form:
-  request date, customer name, a required **Reference** file (named after the PO/RFQ no.), a required **assigned technical**, and one or more items (a
+  request date, customer name, a required **Reference** file (named after the PO/RFQ no.), a required **assigned technical** (dropdown), and one or more items (a
   **single item / multiple items** toggle, like the check-out form), each
   with an item from the inventory list, quantity and serial number(s).
   "Requested by" is filled from the signed-in email and can't be changed.
@@ -63,3 +63,14 @@ handed to literally anyone on the internet, only to people with a company
 account. That was a deliberate trade-off: the alternative (open read access
 to anyone with the link) would also expose customer names, PO numbers and
 delivery routes to the open internet.
+
+## Technical dashboard
+
+Shows each technical's units out on test and every assignment (technical,
+customer, item, quantity, serial no., status, PDI). The technical a request
+is assigned to — matched on their sign-in email — can **Mark Passed /
+Returned** and **Upload PDI** for it; everyone else sees it read-only. The
+main system downloads the PDI once, which removes it. Technicals and emails
+are listed in `TECHNICALS` in `index.html` (keep in step with the main
+system). See the main system's README for details and the limits of this
+protection.
