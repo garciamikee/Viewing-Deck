@@ -15,6 +15,7 @@ It shows:
   **single item / multiple items** toggle, like the check-out form), each
   with an item from the inventory list, quantity and serial number(s).
   "Requested by" is filled from the signed-in email and can't be changed.
+  The customer is a dropdown of the Delivery Tracker customers with a **+ Add new customer…** option. A serial number that was already used (on another request, checked out in the Delivery Tracker, or not in stock) is refused.
   Filing a request takes the units out of stock straight away (stock is
   re-read from the database at that moment, so two people can't both take the
   last units) and creates a record in the main system, where its status is

@@ -243,7 +243,7 @@
       <form id="testForm">
         <div class="formgrid">
           <div class="field"><label>Request date</label><input name="date" type="date" required></div>
-          <div class="field"><label>Customer name</label><input name="customer" required placeholder="e.g. Infinivan"></div>
+          <div class="field"><label>Customer name</label><select name="customer" id="testCustomer" required></select><input id="testCustomerNew" name="newCustomer" placeholder="Type the new customer name" hidden style="margin-top:6px;"></div>
           <div class="field"><label>Assigned technical</label><select name="technical" id="testTechnical" required></select></div>
           <div class="field"><label>Reference (attachment)</label><input id="testReference" name="reference" type="file" required accept=".pdf,.png,.jpg,.jpeg,.doc,.docx,.xls,.xlsx,.csv,.txt,.eml,.msg"><div style="font-size:11.5px;color:var(--muted);margin-top:4px;">Required. Name the file after the PO/RFQ no. (e.g. RFQ-2026-014.pdf). Max 3 MB.</div></div>
           <div class="field"><label>Requested by</label><input id="testRequestedBy" readonly placeholder="Your sign-in email"></div>
@@ -542,22 +542,65 @@
     return {lines:lines};
   }
 
-  // A serial already on another request (anything not Returned) can't be requested again,
-  // and the same serial can't appear twice in one request.
+  // Customer dropdown for a test request: the customers already in the Delivery Tracker (plus any added on
+  // earlier test requests), and an "Add new customer" option that reveals a text box.
+  var NEW_CUSTOMER = "__new__";
+  function customerNames(){
+    var seen = {}, out = [];
+    state.deliveries.concat(state.testRequests).forEach(function(x){
+      var n = String(x.customer||"").trim(), k = n.toLowerCase();
+      if(n && !seen[k]){ seen[k] = true; out.push(n); }
+    });
+    return out.sort(function(a,b){ return a.localeCompare(b, undefined, {sensitivity:"base"}); });
+  }
+  function toggleNewCustomer(){
+    var isNew = document.getElementById("testCustomer").value === NEW_CUSTOMER, inp = document.getElementById("testCustomerNew");
+    inp.hidden = !isNew; inp.required = isNew;
+    if(!isNew) inp.value = "";
+  }
+  function fillCustomerSelect(){
+    var sel = document.getElementById("testCustomer"), keep = sel.value;
+    sel.innerHTML = '<option value="">Select customer…</option>' +
+      customerNames().map(function(n){ return '<option value="'+esc(n)+'">'+esc(n)+'</option>'; }).join("") +
+      '<option value="'+NEW_CUSTOMER+'">+ Add new customer…</option>';
+    sel.value = keep || "";
+    toggleNewCustomer();
+  }
+  // The chosen customer's name; a typed new name that matches an existing customer reuses that spelling.
+  function chosenCustomer(){
+    var v = document.getElementById("testCustomer").value;
+    if(v !== NEW_CUSTOMER) return v;
+    var typed = document.getElementById("testCustomerNew").value.trim().replace(/\s+/g, " ");
+    var match = customerNames().filter(function(n){ return n.toLowerCase() === typed.toLowerCase(); })[0];
+    return match || typed;
+  }
+
+  // A serial number that has already been used can't be requested again: it is on another request (anything
+  // not Returned), it already went out on a delivery, or it isn't in the stock record for that item.
+  function serialKey(s){ return String(s).trim().toLowerCase(); }
   function findSerialConflict(lines){
-    var taken = {};
+    var taken = {}, shipped = {};
     state.testRequests.forEach(function(r){
       if(r.status === "Returned") return;
-      getLines(r).forEach(function(l){ (l.serials||[]).forEach(function(s){ taken[l.itemId+"|"+s] = r; }); });
+      getLines(r).forEach(function(l){ (l.serials||[]).forEach(function(s){ taken[l.itemId+"|"+serialKey(s)] = r; }); });
+    });
+    state.deliveries.forEach(function(d){
+      getLines(d).forEach(function(l){ (l.serials||[]).forEach(function(s){ shipped[l.itemId+"|"+serialKey(s)] = d; }); });
     });
     var seen = {};
     for(var i=0;i<lines.length;i++){
+      var it = state.inventory.find(function(x){ return x.id === lines[i].itemId; });
+      var inStock = {}; (it && it.serials || []).forEach(function(s){ inStock[serialKey(s)] = true; });
       for(var j=0;j<lines[i].serials.length;j++){
-        var s = lines[i].serials[j], key = lines[i].itemId+"|"+s;
+        var s = lines[i].serials[j], k = serialKey(s), key = lines[i].itemId+"|"+k;
         if(seen[key]) return "Serial number "+s+" is listed twice in this request.";
         seen[key] = true;
         var r = taken[key];
-        if(r) return "Serial number "+s+" is already on a test request ("+r.customer+", "+(r.po||"no reference")+" — "+(r.deliveryId ? "Checked out" : r.status)+"). See the list below.";
+        if(r) return "Serial number "+s+" has already been used — it is on a test request ("+r.customer+", "+(r.po||"no reference")+" — "+(r.deliveryId ? "Checked out" : r.status)+"). The request was not filed.";
+        if(inStock[k]) continue;
+        var d = shipped[key];
+        if(d) return "Serial number "+s+" has already been used — it was checked out to "+d.customer+(d.po ? " ("+d.po+")" : "")+". The request was not filed.";
+        if(it && (it.serials||[]).length) return "Serial number "+s+" isn't in stock for "+it.model+" — it has already gone out or the number is wrong. The request was not filed.";
       }
     }
     return "";
@@ -578,6 +621,10 @@
       if(!snap.exists) throw new Error("An item on this request is no longer in the inventory list.");
       var cur = snap.data();
       if(byItem[ids[i]].qty > (cur.stock||0)) throw new Error("Only "+(cur.stock||0)+" of "+cur.model+" on hand — reduce the quantity.");
+      // Checked against the live record too, in case the units were taken a moment ago.
+      var have = {}; (cur.serials||[]).forEach(function(s){ have[serialKey(s)] = true; });
+      var gone = byItem[ids[i]].serials.filter(function(s){ return !have[serialKey(s)]; })[0];
+      if(gone && (cur.serials||[]).length) throw new Error("Serial number "+gone+" has already been used — it isn't in stock for "+cur.model+". The request was not filed.");
       before[ids[i]] = cur;
     }
     var applied = [];
@@ -611,6 +658,7 @@
   }
 
   function renderTestForm(){
+    fillCustomerSelect();
     document.querySelectorAll("#testLines select.line-item").forEach(fillLineSelect);
     var by = document.getElementById("testRequestedBy");
     by.defaultValue = currentUserEmail();
@@ -830,6 +878,7 @@
     var today = new Date().toISOString().slice(0,10);
     form.elements.date.value = today;
     resetTestLines();
+    document.getElementById("testCustomer").addEventListener("change", toggleNewCustomer);
 
     function say(text, kind){ msg.textContent = text; msg.className = "formmsg" + (kind ? " " + kind : ""); }
 
@@ -854,6 +903,8 @@
       var email = currentUserEmail();
       if(!db || !email){ say("Not connected — sign in again and retry.", "err"); return; }
       var data = {}; new FormData(form).forEach(function(v,k){ data[k] = v; });
+      var customer = chosenCustomer();
+      if(!customer){ say("Pick a customer, or add a new one.", "err"); return; }
       var read = readTestLines();
       if(read.error){ say(read.error, "err"); return; }
       var conflict = findSerialConflict(read.lines);
@@ -876,7 +927,7 @@
         var units = 0;
         var lines = read.lines.map(function(l){ units += l.qty; return { itemId:l.itemId, itemLabel:labels[l.itemId], qty:l.qty, serials:l.serials }; });
         await db.collection("test_requests").add(Object.assign({
-          requestDate: data.date, customer: data.customer.trim(), technical: (data.technical||"").trim(), technicalEmail: technicalEmailFor((data.technical||"").trim()), po: referenceNumber(refFile.name),
+          requestDate: data.date, customer: customer, technical: (data.technical||"").trim(), technicalEmail: technicalEmailFor((data.technical||"").trim()), po: referenceNumber(refFile.name),
           requestedBy: email, lines: lines,
           status: "On going", statusHistory: [{ status: "On going", at: now }], deliveryId: "",
           createdAt: now, updatedAt: now
