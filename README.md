@@ -78,7 +78,7 @@ protection.
 
 ## Testing status
 
-The assigned technical (and only them) can set a request to **Passed**,
+The assigned technical (and only them) can set **each item (line)** of a request to **Passed**,
 **Incomplete**, **Defective** or **Returned** from the Technical dashboard:
 
 | From | Can go to |
@@ -94,3 +94,13 @@ The assigned technical (and only them) can set a request to **Passed**,
 - **Returned** — puts the units back in stock, as before.
 
 All tables on the deck are compact and show a scroll bar when they overflow.
+
+Each line item has its own status (one request can have a Passed item and a Defective one), shown and changed
+per row in the Technical dashboard. Only Passed items go out on a check-out.
+
+## Reference file download
+
+The Technical dashboard has a **Reference** column: the PO/RFQ number and, for the assigned technical only, a
+**Download reference** button. The reference file can be downloaded twice in total — once by the main system and
+once here by the assigned technical. When both have downloaded it, the file is deleted from the database to save
+space.

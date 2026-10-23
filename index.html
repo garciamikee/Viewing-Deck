@@ -273,8 +273,8 @@
     <div class="note" id="techWho" style="margin:12px 0;"></div>
     <div class="table-wrap compact scroll-y scroll-auto">
       <table>
-        <thead><tr><th>Assigned technical</th><th>Customer</th><th>Item</th><th>Qty</th><th>Serial no.</th><th>Testing status</th><th>PDI</th></tr></thead>
-        <tbody id="techBody"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
+        <thead><tr><th>Assigned technical</th><th>Customer</th><th>Reference</th><th>Item</th><th>Qty</th><th>Serial no.</th><th>Testing status</th><th>PDI</th></tr></thead>
+        <tbody id="techBody"><tr><td colspan="8" class="empty">Loading…</td></tr></tbody>
       </table>
     </div>
     <input type="file" id="pdiFile" hidden accept=".pdf,.png,.jpg,.jpeg,.doc,.docx,.xls,.xlsx,.csv,.txt,.eml,.msg">
@@ -288,7 +288,7 @@
     <p class="lede" style="margin:-4px 0 12px;">Check here before filing — if the units are already on a request, you'll see it below. A serial number can't be on two requests.</p>
     <div class="table-wrap compact scroll-y scroll-auto">
       <table>
-        <thead><tr><th>Request date</th><th>Customer</th><th>Reference</th><th>Assigned technical</th><th>Item(s)</th><th>Requested by</th><th>Status</th></tr></thead>
+        <thead><tr><th>Request date</th><th>Customer</th><th>Reference</th><th>Assigned technical</th><th>Item(s)</th><th>Requested by</th></tr></thead>
         <tbody id="testRequestsBody"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody>
       </table>
     </div>
@@ -490,15 +490,23 @@
     var it = state.inventory.find(function(i){ return i.id === id; });
     return it ? it.model : (fallback || id || "—");
   }
-  function testPill(r){
-    if(r.deliveryId) return '<span class="pill accentpill">Checked out</span>';
-    if(r.status === "Passed") return '<span class="pill good">Passed</span>';
-    if(r.status === "Returned") return '<span class="pill neutral">Returned</span>';
-    if(r.status === "Incomplete") return '<span class="pill incomplete">Incomplete</span>';
-    if(r.status === "Defective") return '<span class="pill bad">Defective</span>';
-    return '<span class="pill warn">On going</span>';
+  // ---- Testing status is kept per line item (each item/units line of a request has its own status) ----
+  var STATUS_PILL = { "Passed":"good", "Returned":"neutral", "Incomplete":"incomplete", "Defective":"bad", "On going":"warn" };
+  function statusPill(s){ return '<span class="pill '+(STATUS_PILL[s] || "warn")+'">'+esc(s || "On going")+'</span>'; }
+  // Requests filed before per-line status existed carry one status for the whole request; lines fall back to it.
+  function lineStatus(r, l){ return l.status || r.status || "On going"; }
+  // Delivery id once a line has been checked out (older requests recorded it on the request itself).
+  function lineOut(r, l){ return l.deliveryId || r.deliveryId || ""; }
+  function linePill(r, l){ return lineOut(r, l) ? '<span class="pill accentpill">Checked out</span>' : statusPill(lineStatus(r, l)); }
+  function lineShown(r, l){ return lineOut(r, l) ? "Checked out" : lineStatus(r, l); }
+  // One status for the whole request (stored as `status` for older readers; the lines are the real record).
+  function rollupStatus(lines){
+    var s = lines.map(function(l){ return l.status || "On going"; });
+    var order = ["On going", "Incomplete", "Passed", "Defective", "Returned"];
+    for(var i=0;i<order.length;i++) if(s.indexOf(order[i]) > -1) return order[i];
+    return "On going";
   }
-  // Statuses a test can move to from its current one. Defective is final: the units stay out of stock.
+  // Statuses a line can move to from its current one. Defective is final: the units stay out of stock.
   var TEST_NEXT = { "On going":["Passed","Incomplete","Defective","Returned"], "Incomplete":["Passed","Defective","Returned"], "Passed":["Returned"] };
   var TEST_SET_LABEL = { "Passed":"Mark Passed", "Incomplete":"Mark Incomplete", "Defective":"Mark Defective", "Returned":"Mark Returned" };
 
@@ -581,8 +589,10 @@
   function findSerialConflict(lines){
     var taken = {}, shipped = {};
     state.testRequests.forEach(function(r){
-      if(r.status === "Returned") return;
-      getLines(r).forEach(function(l){ (l.serials||[]).forEach(function(s){ taken[l.itemId+"|"+serialKey(s)] = r; }); });
+      getLines(r).forEach(function(l){
+        if(lineStatus(r, l) === "Returned") return;
+        (l.serials||[]).forEach(function(s){ taken[l.itemId+"|"+serialKey(s)] = { r:r, l:l }; });
+      });
     });
     state.deliveries.forEach(function(d){
       getLines(d).forEach(function(l){ (l.serials||[]).forEach(function(s){ shipped[l.itemId+"|"+serialKey(s)] = d; }); });
@@ -595,8 +605,8 @@
         var s = lines[i].serials[j], k = serialKey(s), key = lines[i].itemId+"|"+k;
         if(seen[key]) return "Serial number "+s+" is listed twice in this request.";
         seen[key] = true;
-        var r = taken[key];
-        if(r) return "Serial number "+s+" has already been used — it is on a test request ("+r.customer+", "+(r.po||"no reference")+" — "+(r.deliveryId ? "Checked out" : r.status)+"). The request was not filed.";
+        var t = taken[key];
+        if(t) return "Serial number "+s+" has already been used — it is on a test request ("+t.r.customer+", "+(t.r.po||"no reference")+" — "+lineShown(t.r, t.l)+"). The request was not filed.";
         if(inStock[k]) continue;
         var d = shipped[key];
         if(d) return "Serial number "+s+" has already been used — it was checked out to "+d.customer+(d.po ? " ("+d.po+")" : "")+". The request was not filed.";
@@ -669,17 +679,17 @@
     var q = (document.getElementById("testSearch").value||"").trim().toLowerCase();
     var rows = state.testRequests.slice().sort(function(a,b){ return new Date(b.createdAt||0) - new Date(a.createdAt||0); }).filter(function(r){
       if(!q) return true;
-      var hay = [r.customer, r.po, r.technical, r.requestedBy, r.deliveryId ? "checked out" : r.status];
-      getLines(r).forEach(function(l){ hay.push(modelOf(l.itemId, l.itemLabel)); hay = hay.concat(l.serials||[]); });
+      var hay = [r.customer, r.po, r.technical, r.requestedBy];
+      getLines(r).forEach(function(l){ hay.push(modelOf(l.itemId, l.itemLabel), lineShown(r, l)); hay = hay.concat(l.serials||[]); });
       return hay.join(" ").toLowerCase().indexOf(q) > -1;
     });
     document.getElementById("testRequestsBody").innerHTML = rows.length ? rows.map(function(r){
       var itemsCell = getLines(r).map(function(l){
         var s = (l.serials||[]).join(", ");
-        return '<div>'+esc(modelOf(l.itemId, l.itemLabel))+' ×'+esc(l.qty)+(s?'<div class="il-serials">'+esc(s)+'</div>':'')+'</div>';
+        return '<div style="margin-bottom:6px;">'+esc(modelOf(l.itemId, l.itemLabel))+' ×'+esc(l.qty)+' '+linePill(r, l)+(s?'<div class="il-serials">'+esc(s)+'</div>':'')+'</div>';
       }).join("");
-      return '<tr><td>'+esc(fmtDate(r.requestDate))+'</td><td>'+esc(r.customer)+'</td><td class="mono">'+esc(r.po||"—")+'</td><td>'+esc(r.technical||"—")+'</td><td>'+itemsCell+'</td><td>'+esc(r.requestedBy||"—")+'</td><td>'+testPill(r)+'</td></tr>';
-    }).join("") : '<tr><td colspan="7" class="empty">'+(q ? "No matches." : "No test requests filed yet.")+'</td></tr>';
+      return '<tr><td>'+esc(fmtDate(r.requestDate))+'</td><td>'+esc(r.customer)+'</td><td class="mono">'+esc(r.po||"—")+'</td><td>'+esc(r.technical||"—")+'</td><td>'+itemsCell+'</td><td>'+esc(r.requestedBy||"—")+'</td></tr>';
+    }).join("") : '<tr><td colspan="6" class="empty">'+(q ? "No matches." : "No test requests filed yet.")+'</td></tr>';
   }
 
   // ---- Technical dashboard ----
@@ -700,14 +710,31 @@
   }
   function notify(text){ return askConfirm(text, null); } // message with a single OK button
 
-  function techStatusCell(r){
-    var html = testPill(r);
-    if(isAssignedTech(r) && !r.deliveryId){
+  // Testing status of one line item; its buttons show only for the assigned technical.
+  function techLineStatusCell(r, l, idx){
+    var html = linePill(r, l);
+    if(isAssignedTech(r) && !lineOut(r, l)){
       var b = "";
-      (TEST_NEXT[r.status] || []).forEach(function(s){
-        b += '<button type="button" class="btn '+(s === "Passed" ? "" : "ghost ")+'small" data-tech-set="'+s+'" data-tech-id="'+esc(r.id)+'">'+TEST_SET_LABEL[s]+'</button>';
+      (TEST_NEXT[lineStatus(r, l)] || []).forEach(function(s){
+        b += '<button type="button" class="btn '+(s === "Passed" ? "" : "ghost ")+'small" data-tech-set="'+s+'" data-tech-id="'+esc(r.id)+'" data-tech-line="'+idx+'">'+TEST_SET_LABEL[s]+'</button>';
       });
       if(b) html += '<div class="row-actions">'+b+'</div>';
+    }
+    return html;
+  }
+  // Reference number, and the assigned technical's one download of the Reference file.
+  function techRefCell(r){
+    var html = '<div class="mono">'+esc(r.po||"—")+'</div>';
+    if(r.attachmentId){
+      if(isAssignedTech(r)){
+        html += r.attachmentTechDownloadedAt
+          ? '<div style="margin-top:4px;"><span class="pill neutral" title="You have already downloaded the reference file.">You downloaded it</span></div>'
+          : '<div class="row-actions"><button type="button" class="btn small" data-ref-download="'+esc(r.id)+'" title="'+esc(r.attachmentName||"")+'">Download reference</button></div>';
+      } else {
+        html += '<div class="il-serials">file available to '+esc(r.technical||"the assigned technical")+'</div>';
+      }
+    } else if(r.attachmentRemovedAt){
+      html += '<div style="margin-top:4px;"><span class="pill neutral" title="Downloaded and removed from storage">File removed</span></div>';
     }
     return html;
   }
@@ -727,13 +754,15 @@
     TECHNICALS.forEach(function(t){ groups[t.name] = blank(); });
     reqs.forEach(function(r){
       var g = groups[techName(r)] = groups[techName(r)] || blank();
-      var u = sumQty(getLines(r));
-      if(r.deliveryId) return;
-      if(r.status === "Returned") g.returned++;
-      else if(r.status === "Defective") g.defective++;
-      else if(r.status === "Incomplete"){ g.incomplete++; g.units += u; }
-      else if(r.status === "Passed"){ g.passed++; g.units += u; }
-      else { g.ongoing++; g.units += u; }
+      getLines(r).forEach(function(l){
+        if(lineOut(r, l)) return;
+        var u = parseInt(l.qty,10)||0, st = lineStatus(r, l);
+        if(st === "Returned") g.returned += u;
+        else if(st === "Defective") g.defective += u;
+        else if(st === "Incomplete"){ g.incomplete += u; g.units += u; }
+        else if(st === "Passed"){ g.passed += u; g.units += u; }
+        else { g.ongoing += u; g.units += u; }
+      });
     });
     var order = TECHNICALS.map(function(t){ return t.name; });
     var names = Object.keys(groups).sort(function(a,b){
@@ -751,28 +780,29 @@
 
     var me = currentUserEmail(), meTech = TECHNICALS.find(function(t){ return t.email === me.toLowerCase(); });
     document.getElementById("techWho").innerHTML = meTech
-      ? 'Signed in as <b>'+esc(meTech.name)+'</b> ('+esc(me)+') — you can update the status and upload the PDI for requests assigned to you.'
-      : 'Signed in as '+esc(me||"—")+' — view only. Status and PDI can be changed only by the assigned technical.';
+      ? 'Signed in as <b>'+esc(meTech.name)+'</b> ('+esc(me)+') — you can update the status of each item, download the reference file (once) and upload the PDI for requests assigned to you.'
+      : 'Signed in as '+esc(me||"—")+' — view only. Status, reference download and PDI belong to the assigned technical.';
 
     var q = (document.getElementById("techSearch").value||"").trim().toLowerCase(), html = "";
     reqs.forEach(function(r){
       if(techFilter && techName(r) !== techFilter) return;
       var lines = getLines(r);
       if(q){
-        var hay = [techName(r), r.customer, r.po, r.deliveryId ? "checked out" : r.status];
-        lines.forEach(function(l){ hay.push(modelOf(l.itemId, l.itemLabel)); hay = hay.concat(l.serials||[]); });
+        var hay = [techName(r), r.customer, r.po];
+        lines.forEach(function(l){ hay.push(modelOf(l.itemId, l.itemLabel), lineShown(r, l)); hay = hay.concat(l.serials||[]); });
         if(hay.join(" ").toLowerCase().indexOf(q) < 0) return;
       }
       var span = Math.max(lines.length, 1);
       lines.forEach(function(l, i){
         html += '<tr>';
-        if(i === 0) html += '<td rowspan="'+span+'">'+esc(techName(r))+'</td><td rowspan="'+span+'">'+esc(r.customer)+'</td>';
+        if(i === 0) html += '<td rowspan="'+span+'">'+esc(techName(r))+'</td><td rowspan="'+span+'">'+esc(r.customer)+'</td><td rowspan="'+span+'">'+techRefCell(r)+'</td>';
         html += '<td>'+esc(modelOf(l.itemId, l.itemLabel))+'</td><td>'+esc(l.qty)+'</td><td class="mono">'+esc((l.serials||[]).join(", ")||"—")+'</td>';
-        if(i === 0) html += '<td rowspan="'+span+'">'+techStatusCell(r)+'</td><td rowspan="'+span+'">'+techPdiCell(r)+'</td>';
+        html += '<td>'+techLineStatusCell(r, l, i)+'</td>';
+        if(i === 0) html += '<td rowspan="'+span+'">'+techPdiCell(r)+'</td>';
         html += '</tr>';
       });
     });
-    document.getElementById("techBody").innerHTML = html || '<tr><td colspan="7" class="empty">'+(q || techFilter ? "No matches." : "No test requests filed yet.")+'</td></tr>';
+    document.getElementById("techBody").innerHTML = html || '<tr><td colspan="8" class="empty">'+(q || techFilter ? "No matches." : "No test requests filed yet.")+'</td></tr>';
   }
 
   // Only the technical a request is assigned to may do this. It's checked against a fresh read of the
@@ -786,48 +816,88 @@
     return rec;
   }
 
-  async function setTechStatus(id, newStatus){
+  // Status is set per line item (one item/units line of the request), by the assigned technical only.
+  async function setTechStatus(id, idx, newStatus){
     if(!db) return;
     try{
       var rec = await freshAssignedRequest(id);
-      if(rec.deliveryId) throw new Error("This request has already been checked out to a delivery.");
-      if((TEST_NEXT[rec.status] || []).indexOf(newStatus) < 0) throw new Error("This request is "+rec.status+" and can't be marked "+newStatus+".");
-      var lines = getLines(rec);
-      var label = lines.map(function(l){ return modelOf(l.itemId, l.itemLabel)+" ×"+l.qty; }).join(", ");
+      var l = getLines(rec)[idx];
+      if(!l) throw new Error("That item is no longer on the request.");
+      if(lineOut(rec, l)) throw new Error("This item has already been checked out to a delivery.");
+      var cur = lineStatus(rec, l);
+      if((TEST_NEXT[cur] || []).indexOf(newStatus) < 0) throw new Error("This item is "+cur+" and can't be marked "+newStatus+".");
+      var label = modelOf(l.itemId, l.itemLabel)+" ×"+l.qty;
       var confirmText = {
-        "Returned":"Mark this test as Returned?\n"+label+" will go back into the inventory list.",
-        "Passed":"Mark this test as Passed?\n"+label+" can then be checked out for delivery.",
-        "Incomplete":"Mark this test as Incomplete?\nThe test isn't finished — "+label+" stays out of stock and can still be marked Passed, Defective or Returned.",
-        "Defective":"Mark this test as Defective?\n"+label+" stays out of stock (it is not added back to the inventory list)."
+        "Returned":"Mark this item as Returned?\n"+label+" will go back into the inventory list.",
+        "Passed":"Mark this item as Passed?\n"+label+" can then be checked out for delivery.",
+        "Incomplete":"Mark this item as Incomplete?\nThe test isn't finished — "+label+" stays out of stock and can still be marked Passed, Defective or Returned.",
+        "Defective":"Mark this item as Defective?\n"+label+" stays out of stock (it is not added back to the inventory list)."
       };
       var ok = await askConfirm(confirmText[newStatus], TEST_SET_LABEL[newStatus]);
       if(!ok) return;
+      // Re-read after the confirmation: another line may have changed in the meantime.
+      var fresh = await freshAssignedRequest(id), fl = getLines(fresh);
+      if(!fl[idx] || lineOut(fresh, fl[idx]) || lineStatus(fresh, fl[idx]) !== cur) throw new Error("Someone just changed this item — check the list and try again.");
       var now = new Date().toISOString();
-      var upd = { status:newStatus, statusHistory:(rec.statusHistory||[]).concat([{status:newStatus, at:now, by:currentUserEmail()}]), updatedAt:now };
-      var restored = [];
+      var restored = false;
       try{
         if(newStatus === "Returned"){
-          upd.returnedAt = now;
-          for(var i=0;i<lines.length;i++){
-            var ref = db.doc("inventory/"+lines[i].itemId), cur = await ref.get();
-            if(!cur.exists) continue; // item since deleted from the inventory list
-            var d = cur.data();
-            await ref.update({ stock:(d.stock||0)+(parseInt(lines[i].qty,10)||0), serials:(d.serials||[]).concat(lines[i].serials||[]), updatedAt:now });
-            restored.push(i);
+          var ref = db.doc("inventory/"+l.itemId), got = await ref.get();
+          if(got.exists){ // an item since deleted from the inventory list has nothing to restore
+            var d = got.data();
+            await ref.update({ stock:(d.stock||0)+(parseInt(l.qty,10)||0), serials:(d.serials||[]).concat(l.serials||[]), updatedAt:now });
+            restored = true;
           }
         }
+        var newLines = fl.map(function(x, i){ return Object.assign({}, x, {status: i === idx ? newStatus : lineStatus(fresh, x)}); });
+        var upd = { lines:newLines, status:rollupStatus(newLines), updatedAt:now,
+          statusHistory:(fresh.statusHistory||[]).concat([{status:newStatus, line:idx, item:modelOf(l.itemId, l.itemLabel), at:now, by:currentUserEmail()}]) };
+        if(newStatus === "Returned") upd.returnedAt = now;
         await db.doc("test_requests/"+id).update(upd);
       }catch(err){
-        for(var u=0;u<restored.length;u++){ // put stock back the way it was
+        if(restored){ // put stock back the way it was
           try{
-            var l2 = lines[restored[u]], r2 = db.doc("inventory/"+l2.itemId), c2 = (await r2.get()).data(), gone = {};
-            (l2.serials||[]).forEach(function(s){ gone[s] = true; });
-            await r2.update({ stock:Math.max(0,(c2.stock||0)-(parseInt(l2.qty,10)||0)), serials:(c2.serials||[]).filter(function(s){ return !gone[s]; }), updatedAt:new Date().toISOString() });
+            var r2 = db.doc("inventory/"+l.itemId), c2 = (await r2.get()).data(), gone = {};
+            (l.serials||[]).forEach(function(s){ gone[s] = true; });
+            await r2.update({ stock:Math.max(0,(c2.stock||0)-(parseInt(l.qty,10)||0)), serials:(c2.serials||[]).filter(function(s){ return !gone[s]; }), updatedAt:new Date().toISOString() });
           }catch(e){ /* best effort */ }
         }
         throw err;
       }
     }catch(err){ await notify("Couldn't update: " + (err && err.message ? err.message : "try again.")); }
+  }
+
+  // The Reference file can be downloaded twice: once by the main system and once here by the assigned
+  // technical. When both have downloaded it, the file is deleted from the database.
+  async function downloadReference(id){
+    if(!db) return;
+    try{
+      var rec = await freshAssignedRequest(id);
+      if(!rec.attachmentId) throw new Error("The reference file has already been downloaded and removed.");
+      if(rec.attachmentTechDownloadedAt) throw new Error("You have already downloaded this reference file.");
+      var ok = await askConfirm("Download "+rec.attachmentName+"?\nThe assigned technical can download it once. It is removed from the system after the main system has downloaded it too — keep your copy.", "Download");
+      if(!ok) return;
+      var parts = [];
+      for(var i=0;i<rec.attachmentChunks;i++){
+        var c = await db.doc("request_files/"+rec.attachmentId+"_"+i).get();
+        if(!c.exists) throw new Error("The file is incomplete or was already removed.");
+        parts.push(c.data().data);
+      }
+      var bin = atob(parts.join("")), bytes = new Uint8Array(bin.length);
+      for(var b=0;b<bin.length;b++) bytes[b] = bin.charCodeAt(b);
+      var url = URL.createObjectURL(new Blob([bytes], {type: rec.attachmentType || "application/octet-stream"}));
+      var a = document.createElement("a");
+      a.href = url; a.download = rec.attachmentName || "reference";
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function(){ URL.revokeObjectURL(url); }, 10000);
+      var now = new Date().toISOString();
+      await db.doc("test_requests/"+id).update({ attachmentTechDownloadedAt:now, attachmentTechDownloadedBy:currentUserEmail(), updatedAt:now });
+      var again = (await db.doc("test_requests/"+id).get()).data();
+      if(again && again.attachmentMainDownloadedAt){
+        await deleteAttachment(rec.attachmentId, rec.attachmentChunks);
+        await db.doc("test_requests/"+id).update({ attachmentId:"", attachmentChunks:0, attachmentRemovedAt:now, updatedAt:now });
+      }
+    }catch(err){ await notify("Couldn't download: " + (err && err.message ? err.message : "try again.")); }
   }
 
   async function uploadTechPdi(id, file){
@@ -857,8 +927,9 @@
     });
     document.getElementById("techSearch").addEventListener("input", renderTechnical);
     document.getElementById("techBody").addEventListener("click", function(e){
-      var st = e.target.closest("[data-tech-set]"), up = e.target.closest("[data-pdi-upload]");
-      if(st) setTechStatus(st.dataset.techId, st.dataset.techSet);
+      var st = e.target.closest("[data-tech-set]"), up = e.target.closest("[data-pdi-upload]"), rf = e.target.closest("[data-ref-download]");
+      if(st) setTechStatus(st.dataset.techId, parseInt(st.dataset.techLine, 10), st.dataset.techSet);
+      if(rf) downloadReference(rf.dataset.refDownload);
       if(up){ pdiTargetId = up.dataset.pdiUpload; document.getElementById("pdiFile").click(); }
     });
     document.getElementById("pdiFile").addEventListener("change", async function(){
@@ -925,7 +996,7 @@
         var labels = await takeOutOfStock(read.lines);
         var now = new Date().toISOString();
         var units = 0;
-        var lines = read.lines.map(function(l){ units += l.qty; return { itemId:l.itemId, itemLabel:labels[l.itemId], qty:l.qty, serials:l.serials }; });
+        var lines = read.lines.map(function(l){ units += l.qty; return { itemId:l.itemId, itemLabel:labels[l.itemId], qty:l.qty, serials:l.serials, status:"On going" }; });
         await db.collection("test_requests").add(Object.assign({
           requestDate: data.date, customer: customer, technical: (data.technical||"").trim(), technicalEmail: technicalEmailFor((data.technical||"").trim()), po: referenceNumber(refFile.name),
           requestedBy: email, lines: lines,
